@@ -15,7 +15,6 @@ class RestaurantDetailPage extends StatefulWidget {
 }
 
 class RestaurantDetailPageState extends State<RestaurantDetailPage> {
-  late Future<void> _fetchDetailFuture;
   final _nameController = TextEditingController();
   final _reviewController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -23,12 +22,10 @@ class RestaurantDetailPageState extends State<RestaurantDetailPage> {
   @override
   void initState() {
     super.initState();
-    _fetchDetailFuture = _fetchRestaurantDetail();
-  }
-
-  Future<void> _fetchRestaurantDetail() async {
-    final provider = Provider.of<RestaurantProvider>(context, listen: false);
-    await provider.fetchRestaurantDetail(widget.restaurant.id);
+    Future.microtask(() {
+      Provider.of<RestaurantProvider>(context, listen: false)
+          .fetchRestaurantDetail(widget.restaurant.id);
+    });
   }
 
   @override
@@ -130,7 +127,7 @@ class RestaurantDetailPageState extends State<RestaurantDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Detail Restoran'),
+        title: Text(widget.restaurant.name),
         actions: [
           Consumer<FavoriteProvider>(
             builder: (context, favoriteProvider, child) {
@@ -144,8 +141,7 @@ class RestaurantDetailPageState extends State<RestaurantDetailPage> {
                       color: isFavorite ? Colors.red : null,
                     ),
                     onPressed: () async {
-                      final message = await favoriteProvider
-                          .toggleFavorite(widget.restaurant);
+                      final message = await favoriteProvider.toggleFavorite(widget.restaurant);
                       if (message != null && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -162,10 +158,8 @@ class RestaurantDetailPageState extends State<RestaurantDetailPage> {
           ),
         ],
       ),
-      body: FutureBuilder(
-        future: _fetchDetailFuture,
-        builder: (context, snapshot) {
-          final provider = Provider.of<RestaurantProvider>(context);
+      body: Consumer<RestaurantProvider>(
+        builder: (context, provider, child) {
           if (provider.restaurantDetailState is Loading) {
             return SingleChildScrollView(
               child: Column(
@@ -175,7 +169,34 @@ class RestaurantDetailPageState extends State<RestaurantDetailPage> {
                     child: Image.network(
                       'https://restaurant-api.dicoding.dev/images/large/${widget.restaurant.pictureId}',
                       width: double.infinity,
+                      height: 200,
                       fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: double.infinity,
+                          height: 200,
+                          color: Colors.grey[300],
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.broken_image_rounded,
+                                size: 48,
+                                color: Colors.grey,
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'Tidak dapat memuat gambar',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -183,77 +204,162 @@ class RestaurantDetailPageState extends State<RestaurantDetailPage> {
                 ],
               ),
             );
-          } else if (provider.restaurantDetailState is Success) {
-            final restaurant =
-                (provider.restaurantDetailState as Success<RestaurantDetail>)
-                    .data;
-            return SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Hero(
-                    tag: 'restaurant_image_${widget.restaurant.id}',
-                    child: Image.network(
-                      'https://restaurant-api.dicoding.dev/images/large/${widget.restaurant.pictureId}',
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Hero(
-                          tag: 'title-${widget.restaurant.id}',
-                          child: Material(
-                            type: MaterialType.transparency,
-                            child: Text(
-                              restaurant.name,
-                              style: Theme.of(context).textTheme.headlineSmall,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on, size: 16),
-                            const SizedBox(width: 4),
-                            Text('${restaurant.city} • ${restaurant.address}'),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(restaurant.description),
-                        const SizedBox(height: 16),
-                        ExpansionTile(
-                          title: const Text('Menu Makanan'),
-                          children: restaurant.menus.foods
-                              .map((food) => ListTile(title: Text(food.name)))
-                              .toList(),
-                        ),
-                        ExpansionTile(
-                          title: const Text('Menu Minuman'),
-                          children: restaurant.menus.drinks
-                              .map((drink) => ListTile(title: Text(drink.name)))
-                              .toList(),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildReviewSection(restaurant.customerReviews),
-                        const Divider(),
-                        _buildReviewForm(),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
+          } else if (provider.restaurantDetailState is Success<RestaurantDetail>) {
+            final restaurantDetail = (provider.restaurantDetailState as Success<RestaurantDetail>).data;
+            return buildDetailContent(context, restaurantDetail);
           } else if (provider.restaurantDetailState is Error) {
-            return ErrorMessage(
-                message: (provider.restaurantDetailState as Error).message);
+            return ErrorMessage(message: (provider.restaurantDetailState as Error).message);
           } else {
             return const Center(child: Text('Unknown state'));
           }
         },
+      ),
+    );
+  }
+
+  Widget buildDetailContent(BuildContext context, RestaurantDetail restaurantDetail) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Hero(
+            tag: 'restaurant_image_${widget.restaurant.id}',
+            child: Image.network(
+              'https://restaurant-api.dicoding.dev/images/large/${widget.restaurant.pictureId}',
+              width: double.infinity,
+              height: 200,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: double.infinity,
+                  height: 200,
+                  color: Colors.grey[300],
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.broken_image_rounded,
+                        size: 48,
+                        color: Colors.grey,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Tidak dapat memuat gambar',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Hero(
+                        tag: 'title-${widget.restaurant.id}',
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: Text(
+                            restaurantDetail.name,
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.star,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            restaurantDetail.rating.toStringAsFixed(1),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.location_on, size: 16),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text('${restaurantDetail.city} • ${restaurantDetail.address}'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Kategori:',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: restaurantDetail.categories.map((category) {
+                    return Chip(
+                      label: Text(category.name),
+                      backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                Text(restaurantDetail.description),
+                const SizedBox(height: 16),
+                ExpansionTile(
+                  title: const Text('Menu Makanan'),
+                  children: restaurantDetail.menus.foods
+                      .map((food) => ListTile(
+                            leading: const Icon(Icons.restaurant_menu),
+                            title: Text(food.name),
+                          ))
+                      .toList(),
+                ),
+                ExpansionTile(
+                  title: const Text('Menu Minuman'),
+                  children: restaurantDetail.menus.drinks
+                      .map((drink) => ListTile(
+                            leading: const Icon(Icons.local_drink),
+                            title: Text(drink.name),
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: 16),
+                _buildReviewSection(restaurantDetail.customerReviews),
+                const Divider(),
+                _buildReviewForm(),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

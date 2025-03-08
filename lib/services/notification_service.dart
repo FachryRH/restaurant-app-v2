@@ -1,6 +1,4 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
@@ -8,78 +6,73 @@ import 'package:restaurant_app/services/api_service.dart';
 
 class NotificationService {
   static const String _channelId = 'daily_reminder';
+  static const int notificationId = 1;
   static final NotificationService _instance = NotificationService._internal();
+  
   factory NotificationService() => _instance;
   NotificationService._internal();
 
   final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
+  final ApiService _apiService = ApiService();
 
   Future<void> init() async {
     tz.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
 
-    const androidInitialize =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidInitialize = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initializationSettings = InitializationSettings(
       android: androidInitialize,
     );
 
     await _flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse details) async {
+        // Handle notification tap
+      },
     );
   }
 
-  Future<bool> _requestExactAlarmPermission(BuildContext context) async {
+  Future<bool> _requestNotificationPermission(BuildContext context) async {
     final platform =
         _flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
     if (platform == null) return false;
 
     try {
-      bool canSchedule =
-          await platform.canScheduleExactNotifications() ?? false;
-      if (!canSchedule) {
-        if (!context.mounted) return false;
-        final shouldOpenSettings = await showDialog<bool>(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: const Text('Izin Diperlukan'),
-                content: const Text(
-                    'Untuk mengaktifkan pengingat, ikuti langkah berikut:\n\n'
-                    '1. Tekan tombol "Buka Pengaturan"\n'
-                    '2. Pilih "Izin Tambahan"\n'
-                    '3. Aktifkan "Jadwalkan alarm yang tepat"\n'
-                    '4. Kembali ke aplikasi'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('Nanti Saja'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    child: const Text('Buka Pengaturan'),
-                  ),
-                ],
-              ),
-            ) ??
-            false;
+      if (!context.mounted) return false;
+      final shouldShowDialog = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Izin Notifikasi'),
+              content: const Text(
+                  'Aplikasi membutuhkan izin untuk menampilkan notifikasi rekomendasi restoran harian.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Tidak'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Ya'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
 
-        if (shouldOpenSettings) {
-          await platform.requestExactAlarmsPermission();
+      if (!shouldShowDialog) return false;
 
-          const methodChannel =
-              MethodChannel('com.example.restaurant_app/settings');
-          try {
-            await methodChannel.invokeMethod('openAlarmSettings');
-          } catch (e) {
-            debugPrint('Failed to open settings: $e');
-          }
+      // Check if we can create notification channel
+      const androidNotificationChannel = AndroidNotificationChannel(
+        'daily_reminder',
+        'Daily Reminder',
+        description: 'Restaurant daily reminder notification',
+        importance: Importance.high,
+      );
 
-          await Future.delayed(const Duration(milliseconds: 500));
-          canSchedule = await platform.canScheduleExactNotifications() ?? false;
-        }
-      }
-      return canSchedule;
+      await platform.createNotificationChannel(androidNotificationChannel);
+      return true;
     } catch (e) {
       return false;
     }
@@ -102,7 +95,7 @@ class NotificationService {
     );
 
     await _flutterLocalNotificationsPlugin.show(
-      1,
+      notificationId,
       title,
       body,
       notificationDetails,
@@ -116,73 +109,71 @@ class NotificationService {
       return;
     }
 
-    final hasPermission = await _requestExactAlarmPermission(context);
+    final hasPermission = await _requestNotificationPermission(context);
     if (!hasPermission) {
       return;
     }
 
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(
-      tz.local,
+    final now = DateTime.now();
+    var scheduledDate = DateTime(
       now.year,
       now.month,
       now.day,
-      11,
+      11, // Schedule for 11 AM
       0,
     );
 
+    // If it's past 11 AM, schedule for tomorrow
     if (scheduledDate.isBefore(now)) {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
     }
 
     try {
-      final apiService = ApiService();
-      final restaurants = await apiService.getRestaurants();
-      final random = Random();
-      final randomRestaurant = restaurants[random.nextInt(restaurants.length)];
+      final restaurants = await _apiService.getRestaurants();
+      String title = 'Waktunya Makan Siang!';
+      String body = 'Yuk cek rekomendasi restoran untuk makan siang kamu hari ini.';
 
-      const androidDetails = AndroidNotificationDetails(
-        _channelId,
-        'Daily Reminder',
-        channelDescription: 'Restaurant daily reminder notification',
-        importance: Importance.high,
-        priority: Priority.high,
-      );
-
-      const notificationDetails = NotificationDetails(
-        android: androidDetails,
-      );
+      if (restaurants.isNotEmpty) {
+        final restaurant = restaurants[DateTime.now().millisecondsSinceEpoch % restaurants.length];
+        title = 'Rekomendasi Restoran Hari Ini!';
+        body = '${restaurant.name} di ${restaurant.city} - Rating: ${restaurant.rating}';
+      }
 
       await _flutterLocalNotificationsPlugin.zonedSchedule(
-        1,
-        'Rekomendasi Restoran Hari Ini!',
-        '${randomRestaurant.name} di ${randomRestaurant.city} - Rating: ${randomRestaurant.rating}',
-        scheduledDate,
-        notificationDetails,
+        notificationId,
+        title,
+        body,
+        tz.TZDateTime.from(scheduledDate, tz.local),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            'Daily Reminder',
+            channelDescription: 'Restaurant daily reminder notification',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.time,
       );
     } catch (e) {
-      const androidDetails = AndroidNotificationDetails(
-        _channelId,
-        'Daily Reminder',
-        channelDescription: 'Restaurant daily reminder notification',
-        importance: Importance.high,
-        priority: Priority.high,
-      );
-
-      const notificationDetails = NotificationDetails(
-        android: androidDetails,
-      );
-
+      // If there's an error fetching restaurants, schedule a generic notification
       await _flutterLocalNotificationsPlugin.zonedSchedule(
-        1,
+        notificationId,
         'Waktunya Makan Siang!',
         'Yuk cek rekomendasi restoran untuk makan siang kamu hari ini.',
-        scheduledDate,
-        notificationDetails,
+        tz.TZDateTime.from(scheduledDate, tz.local),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            'Daily Reminder',
+            channelDescription: 'Restaurant daily reminder notification',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
@@ -192,6 +183,6 @@ class NotificationService {
   }
 
   Future<void> cancelDailyNotification() async {
-    await _flutterLocalNotificationsPlugin.cancel(1);
+    await _flutterLocalNotificationsPlugin.cancel(notificationId);
   }
 }

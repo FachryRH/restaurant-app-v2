@@ -48,17 +48,17 @@ class RestaurantProvider extends ChangeNotifier {
   }
 
   Future<void> fetchRestaurantDetail(String id) async {
-    _restaurantDetailState = Loading();
-    notifyListeners();
-
     try {
+      _restaurantDetailState = Loading();
+      notifyListeners();
+      
       final restaurantDetail = await apiService.getRestaurantDetail(id);
       _restaurantDetailState = Success(restaurantDetail);
+      notifyListeners();
     } catch (e) {
-      _restaurantDetailState = Error(
-          'Maaf, terjadi kesalahan saat memuat detail restoran. Silakan periksa koneksi internet Anda dan coba lagi.');
+      _restaurantDetailState = Error('Maaf, terjadi kesalahan saat memuat detail restoran. Silakan periksa koneksi internet Anda dan coba lagi.');
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   Future<void> searchRestaurants(String query) async {
